@@ -253,6 +253,16 @@ define Device/tplink_tl-wdr3600-v1
 endef
 TARGET_DEVICES += tplink_tl-wdr3600-v1
 
+define Device/tplink_tl-wdr3600-16m
+  $(Device/tplink-16mlzma)
+  ATH_SOC := ar9344
+  DEVICE_TITLE := TP-Link TL-WDR3600 16M
+  DEVICE_PACKAGES := kmod-usb-core kmod-usb2 kmod-usb-ledtrig-usbport
+  TPLINK_HWID := 0x36000001
+  SUPPORTED_DEVICES += tl-wdr3600-16m
+endef
+TARGET_DEVICES += tplink_tl-wdr3600-16m
+
 define Device/tplink_tl-wdr4300-v1
   $(Device/tplink-8mlzma)
   ATH_SOC := ar9344

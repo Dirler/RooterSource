@@ -222,6 +222,7 @@ ath79_setup_interfaces()
 	tplink,archer-c7-v4|\
 	tplink,archer-c7-v5|\
 	tplink,tl-wdr3600-v1|\
+	tplink,tl-wdr3600-16m|\
 	tplink,tl-wdr4300-v1|\
 	tplink,tl-wdr4300-v1-il|\
 	tplink,tl-wdr4310-v1|\
@@ -374,6 +375,7 @@ ath79_setup_macs()
 		wan_mac=$(macaddr_add "$base_mac" 1)
 		;;
 	tplink,tl-wdr3600-v1|\
+	tplink,tl-wdr3600-16m|\
 	tplink,tl-wdr4300-v1|\
 	tplink,tl-wdr4300-v1-il)
 		base_mac=$(mtd_get_mac_binary u-boot 0x1fc00)
