@@ -195,6 +195,7 @@ chcklog() {
 
 get_connect() {
 	NAPN=$(uci -q get modem.modeminfo$CURRMODEM.apn)
+	NAPN2=$(uci -q get modem.modeminfo$CURRMODEM.apn2)
 	NUSER=$(uci -q get modem.modeminfo$CURRMODEM.user)
 	NPASS=$(uci -q get modem.modeminfo$CURRMODEM.passw)
 	NAUTH=$(uci -q get modem.modeminfo$CURRMODEM.auth)
@@ -224,6 +225,7 @@ get_connect() {
 	esac
 
 	uci set modem.modem$CURRMODEM.apn=$NAPN
+	uci set modem.modem$CURRMODEM.apn2=$NAPN2
 	uci set modem.modem$CURRMODEM.user=$NUSER
 	uci set modem.modem$CURRMODEM.passw=$NPASS
 	uci set modem.modem$CURRMODEM.auth=$NAUTH
@@ -474,6 +476,12 @@ case $PROT in
 	uci set modem.modem$CURRMODEM.interface=$ifname
 	uci commit modem
 	;;
+	"28" )
+	OX="$(for a in /sys/class/net/*; do readlink $a; done | grep "$MATCH" | grep ".6/net/")"
+	ifname=$(basename $OX)
+	uci set modem.modem$CURRMODEM.interface=$ifname
+	uci commit modem
+	;;
 esac
 
 OX=$(for a in /sys/class/tty/*; do readlink $a; done | grep "$MATCH" | tr '\n' ' ' | xargs -r -n1 basename)
@@ -611,6 +619,10 @@ uci commit modem.modem$CURRMODEM
 							fi
 							mbimcport
 						;;
+						"1e0e" )
+							get_tty 02
+							mbimcport
+						;; 
 						"2cb7" )
 							get_tty_fix 0
 							lua $ROOTER/common/modemchk.lua "$idV" "$idP" "$CPORT" "$CPORT"
@@ -638,7 +650,7 @@ uci commit modem.modem$CURRMODEM
 #
 	"4"|"6"|"7"|"24"|"26"|"27" )
 		if [ "$idV" = "2c7c" -a "$idP" = "0900" ]; then
-			ATCMDD='AT+QCFG="usbnet",2'
+			ATCMDD='AT+QCFG="usbnet",1'
 			OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB2" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
 			ATCMDD='AT+CFUN=1,1'
 			OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB2" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
@@ -689,6 +701,17 @@ fi
 if [ -e $ROOTER/connect/preconnect.sh ]; then
 	if [ "$RECON" != "2" ]; then
 		$ROOTER/connect/preconnect.sh $CURRMODEM
+	fi
+fi
+
+if [ $idV = 413c -a $idP = 81d8 ]; then
+	ATCMDD="AT+CFUN?"
+	OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$CPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
+	if `echo $OX | grep -o "5" >/dev/null 2>&1`; then
+		ATCMDD='at^nv=2497,1,"01";+reset'
+		OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$CPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
+		/usr/lib/rooter/luci/restart.sh $CURRMODEM 11
+		exit 0
 	fi
 fi
 
@@ -790,6 +813,9 @@ if [ -n "$CHKPORT" ]; then
 		log " SIM Error"
 		if [ -e $ROOTER/simerr.sh ]; then
 			$ROOTER/simerr.sh $CURRMODEM
+			if [ -e $ROOTER/connect/chkconn.sh ]; then
+				jkillall chkconn.sh
+			fi
 		fi
 		exit 0
 	fi
@@ -864,7 +890,11 @@ if [ -n "$CHKPORT" ]; then
 	if [ -z "$ttl" ]; then
 		ttl="0"
 	fi
-	$ROOTER/connect/handlettl.sh $CURRMODEM "$ttl" &
+	ttloption=$(uci -q get modem.modeminfo$CURRMODEM.ttloption)
+	if [ -z "$ttloption" ]; then
+		ttloption="0"
+	fi
+	$ROOTER/connect/handlettl.sh $CURRMODEM "$ttl" "$ttloption" &
 
 	if [ -e $ROOTER/changedevice.sh ]; then
 		$ROOTER/changedevice.sh $ifname
@@ -884,10 +914,16 @@ if [ -n "$CHKPORT" ]; then
 			isplist=$(grep -F "$mcc5" '/usr/lib/autoapn/apn.data')
 			if [ -z "$isplist" ]; then
 				isplist="000000,$NAPN,Default,$NPASS,$CID,$NUSER,$NAUTH"
+				if [ ! -z "$NAPN2" ]; then
+					isplist=$isplist" 000000,$NAPN2,Default,$NPASS,$CID,$NUSER,$NAUTH"
+				fi
 			fi
 		fi
 	else
 		isplist="000000,$NAPN,Default,$NPASS,$CID,$NUSER,$NAUTH"
+		if [ ! -z "$NAPN2" ]; then
+			isplist=$isplist" 000000,$NAPN2,Default,$NPASS,$CID,$NUSER,$NAUTH"
+		fi
 	fi
 
 	uci set modem.modeminfo$CURRMODEM.isplist="$isplist"
@@ -1025,6 +1061,7 @@ do
 		fi
 		
 		if [ -e $ROOTER/connect/chkconn.sh ]; then
+			jkillall chkconn.sh
 			$ROOTER/connect/chkconn.sh $CURRMODEM &
 		fi
 
@@ -1063,16 +1100,21 @@ do
 	# QMI connect script
 	#
 		"2" )
-			check_apn
-			$ROOTER/qmi/connectqmi.sh $CURRMODEM cdc-wdm$WDMNX $NAUTH $NAPN $NUSER $NPASS $RAW $DHCP $PINC
-			if [ $? = 0 ]; then
-				ifup wan$INTER
-				[ -f /tmp/ipv6supp$INTER ] && addv6
-			else
-				#log "Restart Modem"
-				#/usr/lib/rooter/luci/restart.sh $CURRMODEM
-				exit 0
+			if [ -n "$CPORT" ]; then
+				check_apn
 			fi
+			log "Using Netifd Method"
+
+			uci delete network.wan$INTER
+			uci set network.wan$INTER=interface
+			uci set network.wan$INTER.proto=qmi
+			uci set network.wan$INTER.device=/dev/cdc-wdm$WDMNX
+			uci set network.wan$INTER.metric=$INTER"0"
+			uci set network.wan$INTER.currmodem=$CURRMODEM
+			uci -q commit network
+			rm -f /tmp/usbwait
+			ifup wan$INTER
+			exit 0
 			;;
 	#
 	# NCM connect script
