@@ -370,13 +370,13 @@ if [ $SP -gt 0 ]; then
 		$ROOTER/connect/bandmask $CURRMODEM 2
 		uci commit modem
 	fi
+	$ROOTER/common/gettype.sh $CURRMODEM
 fi
 	
 if [ -e $ROOTER/modem-led.sh ]; then
 	$ROOTER/modem-led.sh $CURRMODEM 2
 fi
 
-$ROOTER/common/gettype.sh $CURRMODEM
 $ROOTER/connect/get_profile.sh $CURRMODEM
 if [ $SP -gt 0 ]; then
 	if [ -e $ROOTER/simlock.sh ]; then
@@ -389,6 +389,11 @@ if [ $SP -gt 0 ]; then
 			$ROOTER/simerr.sh $CURRMODEM
 		fi
 		#exit 0
+	fi
+	detect=$(uci -q get modem.modeminfo$CURRMODEM.detect)
+	if [ "$detect" = "1" ]; then
+		log "Stopped after detection"
+		exit 0
 	fi
 	if [ -e /usr/lib/gps/gps.sh ]; then
 		/usr/lib/gps/gps.sh $CURRMODEM &

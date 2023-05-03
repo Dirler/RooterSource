@@ -196,6 +196,7 @@ chcklog() {
 get_connect() {
 	NAPN=$(uci -q get modem.modeminfo$CURRMODEM.apn)
 	NAPN2=$(uci -q get modem.modeminfo$CURRMODEM.apn2)
+	NAPN3=$(uci -q get modem.modeminfo$CURRMODEM.apn3)
 	NUSER=$(uci -q get modem.modeminfo$CURRMODEM.user)
 	NPASS=$(uci -q get modem.modeminfo$CURRMODEM.passw)
 	NAUTH=$(uci -q get modem.modeminfo$CURRMODEM.auth)
@@ -226,6 +227,7 @@ get_connect() {
 
 	uci set modem.modem$CURRMODEM.apn=$NAPN
 	uci set modem.modem$CURRMODEM.apn2=$NAPN2
+	uci set modem.modem$CURRMODEM.apn3=$NAPN3
 	uci set modem.modem$CURRMODEM.user=$NUSER
 	uci set modem.modem$CURRMODEM.passw=$NPASS
 	uci set modem.modem$CURRMODEM.auth=$NAUTH
@@ -704,17 +706,6 @@ if [ -e $ROOTER/connect/preconnect.sh ]; then
 	fi
 fi
 
-if [ $idV = 413c -a $idP = 81d8 ]; then
-	ATCMDD="AT+CFUN?"
-	OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$CPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
-	if `echo $OX | grep -o "5" >/dev/null 2>&1`; then
-		ATCMDD='at^nv=2497,1,"01";+reset'
-		OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$CPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
-		/usr/lib/rooter/luci/restart.sh $CURRMODEM 11
-		exit 0
-	fi
-fi
-
 if $QUECTEL; then
 	if [ "$RECON" != "2" ]; then
 		ATCMDD="AT+CNMI?"
@@ -813,12 +804,16 @@ if [ -n "$CHKPORT" ]; then
 		log " SIM Error"
 		if [ -e $ROOTER/simerr.sh ]; then
 			$ROOTER/simerr.sh $CURRMODEM
-			if [ -e $ROOTER/connect/chkconn.sh ]; then
-				jkillall chkconn.sh
-			fi
 		fi
 		exit 0
 	fi
+	
+	detect=$(uci -q get modem.modeminfo$CURRMODEM.detect)
+	if [ "$detect" = "1" ]; then
+		log "Stopped after detection"
+		exit 0
+	fi
+	
 	if [ -e /usr/lib/gps/gps.sh ]; then
 		/usr/lib/gps/gps.sh $CURRMODEM &
 	fi
@@ -904,6 +899,15 @@ if [ -n "$CHKPORT" ]; then
 	imsi=$(uci -q get modem.modem$CURRMODEM.imsi)
 	mcc6=${imsi:0:6}
 	mcc5=${imsi:0:5}
+
+	apndata=""
+	if [ -e /usr/lib/rooter/connect/apndata.sh ]; then
+		/usr/lib/rooter/connect/apndata.sh $CURRMODEM
+		if [ -e /tmp/apndata ]; then
+			apndata=$(cat /tmp/apndata)" "
+		fi
+	fi
+	
 	apd=0
 	if [ -e /usr/lib/autoapn/apn.data ]; then
 		apd=1
@@ -917,13 +921,24 @@ if [ -n "$CHKPORT" ]; then
 				if [ ! -z "$NAPN2" ]; then
 					isplist=$isplist" 000000,$NAPN2,Default,$NPASS,$CID,$NUSER,$NAUTH"
 				fi
+				if [ ! -z "$NAPN3" ]; then
+					isplist=$isplist" 000000,$NAPN3,Default,$NPASS,$CID,$NUSER,$NAUTH"
+				fi
 			fi
 		fi
 	else
-		isplist="000000,$NAPN,Default,$NPASS,$CID,$NUSER,$NAUTH"
-		if [ ! -z "$NAPN2" ]; then
-			isplist=$isplist" 000000,$NAPN2,Default,$NPASS,$CID,$NUSER,$NAUTH"
+		if [ -z "$apndata" ]; then
+			isplist=$apndata"000000,$NAPN,Default,$NPASS,$CID,$NUSER,$NAUTH"
+			if [ ! -z "$NAPN2" ]; then
+				isplist=$isplist" 000000,$NAPN2,Default,$NPASS,$CID,$NUSER,$NAUTH"
+			fi
+			if [ ! -z "$NAPN3" ]; then
+				isplist=$isplist" 000000,$NAPN3,Default,$NPASS,$CID,$NUSER,$NAUTH"
+			fi
+		else
+			isplist=$apndata
 		fi
+		 log "$isplist"
 	fi
 
 	uci set modem.modeminfo$CURRMODEM.isplist="$isplist"

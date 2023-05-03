@@ -280,7 +280,7 @@ f_main()
 				cnt=0
 				delay=10
 				reconn=$(uci -q get travelmate.global.reconn)
-				while [ ${cnt} -lt $reconn ]
+				while [ ${cnt} -le $reconn ]
 				do
 					f_log "info" " Retry Count ${cnt}"
 					if [ $reconn -eq 99 ]; then
@@ -295,6 +295,17 @@ f_main()
 						else
 							FILE="/tmp/hotman"
 						fi
+						
+						sgn=$(uci -q get travelmate.global.signal)
+						if [ "$sgn" = "1" ]; then
+							rm -f /tmp/hotspot
+							echo "$ssid_list" > /tmp/ssidlist
+							/usr/lib/hotspot/sort.lua
+							if [ -e /tmp/hotspot ]; then
+								FILE="/tmp/hotspot"
+							fi
+						fi
+						
 						if [ -f "${FILE}" ]; then
 							# read list of selected Hotspots
 							while IFS='|' read -r ssid encrypt key
@@ -309,6 +320,9 @@ f_main()
 									uci commit travelmate
 									uci -q set wireless.wwan$wif.ssid="$ssid"
 									uci -q set wireless.wwan$wif.encryption=$encrypt
+									if [ "$encrypt" = "none" ]; then
+										key=""
+									fi
 									uci -q set wireless.wwan$wif.key=$key
 									uci -q set wireless.wwan$wif.disabled=0
 									uci -q commit wireless
