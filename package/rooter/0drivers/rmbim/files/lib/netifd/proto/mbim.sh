@@ -14,6 +14,13 @@ log() {
 	modlog "MBIM Connect $CURRMODEM" "$@"
 }
 
+handle_ip() {
+    local value="$1"
+	if [ "$value" = "ipv6.google.com" ]; then
+		ipv6=1
+	fi
+}
+
 enb=$(uci -q get custom.connect.ipv6)
 if [ -z $enb ]; then
 	enb="1"
@@ -41,21 +48,25 @@ get_connect() {
 	auth=$NAUTH
 	pincode=$PINC
 
-	if [ "$PDPT" = 0 ]; then
-		ipt=""
+	if [ "$pipv4" = "1" -a "$creg" = "5" ]; then
+		ipt="ipv4:"
 	else
-		IPVAR=$(uci -q get modem.modem$CURRMODEM.pdptype)
-		case "$IPVAR" in
-			"IP" )
-				ipt="ipv4:"
-			;;
-			"IPV6" )
-				ipt="ipv6:"
-			;;
-			"IPV4V6" )
-				ipt="ipv4v6:"
-			;;
-		esac
+		if [ "$PDPT" = 0 ]; then
+			ipt=""
+		else
+			IPVAR=$(uci -q get modem.modem$CURRMODEM.pdptype)
+			case "$IPVAR" in
+				"IP" )
+					ipt="ipv4:"
+				;;
+				"IPV6" )
+					ipt="ipv6:"
+				;;
+				"IPV4V6" )
+					ipt="ipv4v6:"
+				;;
+			esac
+		fi
 	fi
 }
 
@@ -196,55 +207,44 @@ _proto_mbim_setup() {
 		$ROOTER/connect/get_profile.sh $CURRMODEM
 	fi
 
-	get_connect
-
-	log "Checking PIN state"
-	tid=$((tid + 1))
-	umbim $DBG -n -t $tid -d $device pinstate
-	retq=$?
-	if [ $retq -eq 2 ]; then
-		log "PIN is required"
-		if [ ! -z $pincode ]; then
-			log "Sending PIN"
-			tid=$((tid + 1))
-			umbim $DBG -n -t $tid -d $device unlock "$pincode" 2>/dev/null
-			retq=$?
-			if [ $retq -ne 0 ]; then
-				log "PIN unlock failed"
-				exit 1
-			else
-				log "PIN unlocked"
-				sleep 3
-				CHKPORT=$(uci get modem.modem$CURRMODEM.commport)
-				if [ ! -z $CHKPORT ]; then
-					$ROOTER/common/gettype.sh $CURRMODEM
-				else
-					get_sub
-				fi
-			fi
-		else
-			log "PIN is missing in the profile"
-			exit 1
-		fi
-	else
-		log "PIN is not required"
-	fi
-
 	log "Register with network"
-	for i in $(seq 30); do
+	for i in $(seq 4); do
 		tid=$((tid + 1))
 		REG=$(umbim $DBG -n -t $tid -d $device registration)
 		retq=$?
 		[ $retq -ne 2 ] && break
+		log "Registering"
 		sleep 2
 	done
 	if [ $retq != 0 ]; then
 		if [ $retq != 4 ]; then
 			log "Subscriber registration failed"
 			proto_notify_error "$interface" NO_REGISTRATION
+			if [ -e /etc/config/wizard ]; then
+				wiz=$(uci -q get wizard.basic.wizard)
+				if [ "$wiz" = "1" ]; then
+					PID=$(ps |grep "chkconn.sh" | grep -v grep |head -n 1 | awk '{print $1}')
+					kill -9 $PID
+					ifdown wan1
+				else
+					/usr/lib/rooter/luci/restart.sh $CURRMODEM 11 1
+				fi
+			else
+				/usr/lib/rooter/luci/restart.sh $CURRMODEM 11 1
+			fi
 			return 1
 		fi
 	fi
+	log "Registered"
+	
+	COMMPORT=$(uci get modem.modem$CURRMODEM.commport)
+	ATCMDD="at+creg?"
+	OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
+	REGV=$(echo "$OX" | grep -o "+CREG: [0-2],[0-5]")
+	creg=$(echo "$REGV" | cut -d, -f2)
+	pipv4=$(uci -q get profile.roaming.ipv4)
+	get_connect
+	
 	MCCMNC=$(echo "$REG" | awk '/provider_id:/ {print $2}')
 	PROV=$(echo "$REG" | awk '/provider_name:/ {print $2}')
 	MCC=${MCCMNC:0:3}
@@ -265,59 +265,99 @@ _proto_mbim_setup() {
 
 	tid=$((tid + 1))
 
-	for isp in $isplist 
+	for wcnt in 1 2 3
 	do
-		NAPN=$(echo $isp | cut -d, -f2)
-		NPASS=$(echo $isp | cut -d, -f4)
-		CID=$(echo $isp | cut -d, -f5)
-		NUSER=$(echo $isp | cut -d, -f6)
-		NAUTH=$(echo $isp | cut -d, -f7)
-		if [ "$NPASS" = "nil" ]; then
-			NPASS="NIL"
-		fi
-		if [ "$NUSER" = "nil" ]; then
-			NUSER="NIL"
-		fi
-		if [ "$NAUTH" = "nil" ]; then
-			NAUTH="0"
-		fi
-		apn=$NAPN
-		username="$NUSER"
-		password="$NPASS"
-		auth=$NAUTH
-		case $auth in
-			"0" )
-				auth="none"
-			;;
-			"1" )
-				auth="pap"
-			;;
-			"2" )
-				auth="chap"
-			;;
-			"*" )
-				auth="none"
-			;;
-		esac
-		
-		if [ ! -e /etc/config/isp ]; then
-			log "Connect to network using $apn"
-		else
-			log "Connect to network"
-		fi
-		
-		if [ ! -e /etc/config/isp ]; then
-			log "$ipt $apn $auth $username $password"
-		fi
-		
-		tidd=0
-		tcnt=4
-		while ! umbim $DBG -n -t $tid -d $device connect "$ipt""$apn" "$auth" "$username" "$password"; do
-			tid=$((tid + 1))
-			sleep 1;
-			tidd=$((tidd + 1))
-			if [ $tidd -gt $tcnt ]; then
-				break;
+		for isp in $isplist 
+		do
+			NAPN=$(echo $isp | cut -d, -f2)
+			NPASS=$(echo $isp | cut -d, -f4)
+			CID=$(echo $isp | cut -d, -f5)
+			NUSER=$(echo $isp | cut -d, -f6)
+			NAUTH=$(echo $isp | cut -d, -f7)
+			if [ "$pipv4" = "1" -a "$creg" = "5" ]; then
+				ipt="ipv4:"
+				IPVAR="IP"
+				log "Roaming"
+			else
+				log "Not Roaming"
+				IPVAR=$(echo $isp | cut -d, -f8)
+				case "$IPVAR" in
+					"IP" )
+						ipt="ipv4:"
+					;;
+					"IPV6" )
+						ipt="ipv6:"
+					;;
+					"IPV4V6" )
+						ipt="ipv4v6:"
+					;;
+				esac
+			fi
+			IDV=$(uci get modem.modem$CURRMODEM.idV)
+			if [ "$IDV" = "12d1" ]; then
+				CFUNOFF="0"
+			else
+				CFUNOFF="4"
+			fi
+			IPUP=$(echo $IPVAR | tr 'a-z' 'A-Z')
+			ATCMDD="AT+CGDCONT=$CID,\"$IPUP\",\"$NAPN\""
+			OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
+			OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$COMMPORT" "run-at.gcom" "$CURRMODEM" "AT+CFUN=$CFUNOFF")
+			OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$COMMPORT" "run-at.gcom" "$CURRMODEM" "AT+CFUN=1")
+			sleep 3
+			ATCMDD="AT+CGDCONT?"
+			OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
+			log "$OX"
+			if [ "$NPASS" = "nil" -o "$NPASS" = "" ]; then
+				NPASS="NIL"
+			fi
+			if [ "$NUSER" = "nil" -o "$NUSER" = "" ]; then
+				NUSER="NIL"
+			fi
+			if [ "$NAUTH" = "nil" ]; then
+				NAUTH="0"
+			fi
+			apn=$NAPN
+			username="$NUSER"
+			password="$NPASS"
+			auth=$NAUTH
+			case $auth in
+				"0" )
+					auth="none"
+				;;
+				"1" )
+					auth="pap"
+				;;
+				"2" )
+					auth="chap"
+				;;
+				"*" )
+					auth="none"
+				;;
+			esac
+			
+			if [ ! -e /etc/config/isp ]; then
+				log "Connect to network using $apn"
+			else
+				log "Connect to network"
+			fi
+			
+			if [ ! -e /etc/config/isp ]; then
+				log "$ipt $apn $auth $username $password"
+			fi
+			
+			tidd=0
+			tcnt=4
+			while ! umbim $DBG -n -t $tid -d $device connect "$ipt""$apn" "$auth" "$username" "$password"; do
+				tid=$((tid + 1))
+				sleep 1;
+				tidd=$((tidd + 1))
+				if [ $tidd -gt $tcnt ]; then
+					break;
+				fi
+			done
+			if [ $tidd -le $tcnt ]; then
+				break
 			fi
 		done
 		if [ $tidd -le $tcnt ]; then
@@ -326,6 +366,18 @@ _proto_mbim_setup() {
 	done
 	if [ $tidd -gt $tcnt ]; then
 		log "Failed to connect to network"
+		if [ -e /etc/config/wizard ]; then
+			wiz=$(uci -q get wizard.basic.wizard)
+			if [ "$wiz" = "1" ]; then
+				PID=$(ps |grep "chkconn.sh" | grep -v grep |head -n 1 | awk '{print $1}')
+				kill -9 $PID
+				ifdown wan1
+			else
+				/usr/lib/rooter/luci/restart.sh $CURRMODEM 11 1
+			fi
+		else
+			/usr/lib/rooter/luci/restart.sh $CURRMODEM 11 1
+		fi
 		return 1
 	fi
 	log "Save Connect Data"
@@ -366,11 +418,12 @@ _proto_mbim_setup() {
 	fi
 
 	log "Connected, setting IP"
-
+	ipv6only="0"
 	if [ $enb = "1" ]; then
 		if [ -n "$IP6" -a -z "$IP" ]; then
 			log "Running IPv6-only mode"
 			nat46=1
+			ipv6only="1"
 		fi
 
 		if [[ $(echo "$IP6" | grep -o "^[23]") ]]; then
@@ -517,18 +570,16 @@ _proto_mbim_setup() {
 		$ROOTER/sms/check_sms.sh $CURRMODEM &
 		ln -s $ROOTER/signal/modemsignal.sh $ROOTER_LINK/getsignal$CURRMODEM
 		# send custom AT startup command
-		if [ $(uci -q get modem.modeminfo$CURRMODEM.at) -eq "1" ]; then
-			ATCMDD=$(uci -q get modem.modeminfo$CURRMODEM.atc)
-			if [ ! -z "${ATCMDD}" ]; then
-				OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
-				OX=$($ROOTER/common/processat.sh "$OX")
-				ERROR="ERROR"
-				if `echo ${OX} | grep "${ERROR}" 1>/dev/null 2>&1`
-				then
-					log "Error sending custom AT command: $ATCMDD with result: $OX"
-				else
-					log "Sent custom AT command: $ATCMDD with result: $OX"
-				fi
+		ATCMDD=$(uci -q get modem.modeminfo$CURRMODEM.atc)
+		if [ ! -z "${ATCMDD}" ]; then
+			OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
+			OX=$($ROOTER/common/processat.sh "$OX")
+			ERROR="ERROR"
+			if `echo ${OX} | grep "${ERROR}" 1>/dev/null 2>&1`
+			then
+				log "Error sending custom AT command: $ATCMDD with result: $OX"
+			else
+				log "Sent custom AT command: $ATCMDD with result: $OX"
 			fi
 		fi
 	fi
@@ -563,16 +614,24 @@ _proto_mbim_setup() {
 				INTER=$CURRMODEM
 			fi
 		fi
-		ENB=$(uci -q get mwan3.wan$CURRMODEM.enabled)
-		if [ ! -z $ENB ]; then
-			if [ $CLB = "1" ]; then
-				uci set mwan3.wan$INTER.enabled=1
-			else
-				uci set mwan3.wan$INTER.enabled=0
+		uci set mwan3.wan$INTER.enabled=1
+		log "Check IPv6 Only"
+		if [ "$ipv6only" = "1" ]; then
+			uci set mwan3.wan$INTER.family='ipv6'
+			ipv6=0
+			config_load mwan3
+			config_list_foreach wan1 track_ip handle_ip
+			if [ "$ipv6" = 0 ]; then
+				uci add_list mwan3.wan$INTER.track_ip='ipv6.google.com'
 			fi
-			uci commit mwan3
-			/usr/sbin/mwan3 restart
+			uci set mwan3.CLAT$INTER.enabled=0
+			log "IPv6"
+		else
+			uci set mwan3.wan$INTER.family='ipv4'
+			uci set mwan3.CLAT$INTER.enabled=0
 		fi
+		uci commit mwan3
+		/usr/sbin/mwan3 restart
 	fi
 	rm -f /tmp/usbwait
 

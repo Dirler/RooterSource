@@ -13,7 +13,12 @@ log() {
 	modlog "QMI Connect $CURRMODEM" "$@"
 }
 
-log "Starting QMI"
+handle_ip() {
+    local value="$1"
+	if [ "$value" = "ipv6.google.com" ]; then
+		ipv6=1
+	fi
+}
 
 proto_qmi_init_config() {
 	available=1
@@ -38,6 +43,9 @@ proto_qmi_init_config() {
 }
 
 proto_qmi_setup() {
+
+	log "Starting QMI"
+
 	local interface="$1"
 	local dataformat connstat plmn_mode mcc mnc
 	local device apn auth username password pincode delay modes pdptype
@@ -118,7 +126,7 @@ proto_qmi_setup() {
 		/sbin/ip link set dev $ifname mtu $mtu
 	}
 
-	timeout=1
+	timeout=3
 
 	# Cleanup current state if any
 	uqmi -s -d "$device" --stop-network 0xffffffff --autoconnect > /dev/null 2>&1
@@ -132,7 +140,7 @@ proto_qmi_setup() {
 	if [ $RAW -eq 1 ]; then
 		dataformat='"raw-ip"'
 	else
-		if [ $idV = 1199 -a $idP = 9055 ]; then
+		if [ "$idV" = "1199" -a "$idP" = "9055" ]; then
 			$ROOTER/gcom/gcom-locked "/dev/ttyUSB$CPORT" "reset.gcom" "$CURRMODEM"
 			dataformat='"802.3"'
 			uqmi -s -d "$device" --set-data-format 802.3
@@ -185,49 +193,48 @@ proto_qmi_setup() {
 
 		proto_notify_error "$interface" NETWORK_REGISTRATION_FAILED
 		proto_block_restart "$interface"
+		if [ -e /etc/config/wizard ]; then
+			wiz=$(uci -q get wizard.basic.wizard)
+			if [ "$wiz" = "1" ]; then
+				PID=$(ps |grep "chkconn.sh" | grep -v grep |head -n 1 | awk '{print $1}')
+				kill -9 $PID
+				ifdown wan1
+			else
+				/usr/lib/rooter/luci/restart.sh $CURRMODEM 11 1
+			fi
+		else
+			/usr/lib/rooter/luci/restart.sh $CURRMODEM 11 1
+		fi
 		return 1
 	done
 
 	[ -n "$modes" ] && uqmi -s -d "$device" --set-network-modes "$modes" > /dev/null 2>&1
 	
-	pdptype="ipv4v6"
-	IPVAR=$(uci -q get modem.modem$CURRMODEM.pdptype)
-	case "$IPVAR" in
-		"IP" )
-			pdptype="ipv4"
-		;;
-		"IPV6" )
-			pdptype="ipv6"
-		;;
-		"IPV4V6" )
-			pdptype="ipv4v6"
-		;;
-	esac
+	COMMPORT=$(uci get modem.modem$CURRMODEM.commport)
+	ATCMDD="at+creg?"
+	OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
+	REGV=$(echo "$OX" | grep -o "+CREG: [0-2],[0-5]")
+	creg=$(echo "$REGV" | cut -d, -f2)
+	pipv4=$(uci -q get profile.roaming.ipv4)
 			
-	pdptype=$(echo "$pdptype" | awk '{print tolower($0)}')
-	[ "$pdptype" = "ip" -o "$pdptype" = "ipv6" -o "$pdptype" = "ipv4v6" ] || pdptype="ip"
-	if [ "$pdptype" = "ip" ]; then
-		[ -z "$autoconnect" ] && autoconnect=1
-		[ "$autoconnect" = 0 ] && autoconnect=""
-	else
-		[ "$autoconnect" = 1 ] || autoconnect=""
-	fi
-	
 	isplist=$(uci -q get modem.modeminfo$CURRMODEM.isplist)
 	apn2=$(uci -q get modem.modeminfo$CURRMODEM.apn2)
-	for isp in $isplist 
+	for wcnt in 1 2 3
+	do
+		for isp in $isplist 
 		do
 			NAPN=$(echo $isp | cut -d, -f2)
 			NPASS=$(echo $isp | cut -d, -f4)
 			CID=$(echo $isp | cut -d, -f5)
 			NUSER=$(echo $isp | cut -d, -f6)
 			NAUTH=$(echo $isp | cut -d, -f7)
-			if [ "$NPASS" = "nil" ]; then
+			if [ "$NPASS" = "nil" -o "$NPASS" = "" ]; then
 				NPASS="NIL"
 			fi
-			if [ "$NUSER" = "nil" ]; then
+			if [ "$NUSER" = "nil" -o "$NUSER" = "" ]; then
 				NUSER="NIL"
 			fi
+			
 			if [ "$NAUTH" = "nil" ]; then
 				NAUTH="0"
 			fi
@@ -249,6 +256,43 @@ proto_qmi_setup() {
 					auth="none"
 				;;
 			esac
+			IPVAR=$(echo $isp | cut -d, -f8)
+			pdptype="ipv4v6"
+			if [ "$pipv4" = "1" -a "$creg" = "5" ]; then
+				pdptype="ipv4"
+				IPVAR="IP"
+				log "Roaming"
+			else
+				log "Not Roaming"
+				case "$IPVAR" in
+					"IP" )
+						pdptype="ipv4"
+					;;
+					"IPV6" )
+						pdptype="ipv6"
+					;;
+					"IPV4V6" )
+						pdptype="ipv4v6"
+					;;
+				esac
+			fi
+			ATCMDD="AT+CGDCONT=$CID,\"$IPVAR\",\"$NAPN\""
+			OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
+			OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$COMMPORT" "run-at.gcom" "$CURRMODEM" "AT+CFUN=$CFUNOFF")
+			OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$COMMPORT" "run-at.gcom" "$CURRMODEM" "AT+CFUN=1")
+			sleep 3
+			ATCMDD="AT+CGDCONT?"
+			OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
+			log "$OX"
+
+			pdptype=$(echo "$pdptype" | awk '{print tolower($0)}')
+			[ "$pdptype" = "ip" -o "$pdptype" = "ipv6" -o "$pdptype" = "ipv4v6" ] || pdptype="ip"
+			if [ "$pdptype" = "ip" ]; then
+				[ -z "$autoconnect" ] && autoconnect=1
+				[ "$autoconnect" = 0 ] && autoconnect=""
+			else
+				[ "$autoconnect" = 1 ] || autoconnect=""
+			fi
 			
 			
 			if [ ! -e /etc/config/isp ]; then
@@ -258,7 +302,7 @@ proto_qmi_setup() {
 			fi
 			
 			if [ ! -e /etc/config/isp ]; then
-				log "Connection Parameters : $NAPN $auth $username $password"
+				log "Connection Parameters : $NAPN $auth $username $password $pdptype"
 			fi
 			conn=0
 			
@@ -267,7 +311,7 @@ proto_qmi_setup() {
 				if ! [ "$cid_4" -eq "$cid_4" ] 2> /dev/null; then
 					log "Unable to obtain client ID"
 				fi
-			}
+			
 			uqmi -s -d "$device" --set-client-id wds,"$cid_4" --set-ip-family ipv4 > /dev/null 2>&1
 			v4s=0	
 			pdh_4=$(uqmi -s -d "$device" --set-client-id wds,"$cid_4" \
@@ -289,14 +333,14 @@ proto_qmi_setup() {
 				v4s=1
 				conn=1
 			fi
-
+			}
 			[ "$pdptype" = "ipv6" -o "$pdptype" = "ipv4v6" ] && {
 				cid_6=$(uqmi -s -d "$device" --get-client-id wds)
 				if ! [ "$cid_6" -eq "$cid_6" ] 2> /dev/null; then
 					log "Unable to obtain client ID"
 					#proto_notify_error "$interface" NO_CID
 				fi
-			}
+			
 
 			uqmi -s -d "$device" --set-client-id wds,"$cid_6" --set-ip-family ipv6 > /dev/null 2>&1
 			v6s=0
@@ -320,10 +364,16 @@ proto_qmi_setup() {
 				v6s=1
 				conn=1
 			fi
+			}
 			if [ $conn -eq 1 ]; then
 				break;
 			fi
+
 		done
+		if [ $conn -eq 1 ]; then
+			break;
+		fi
+	done
 
 	if [ $conn -eq 0 ]; then
 		proto_notify_error "$interface" CALL_FAILED
@@ -492,18 +542,16 @@ proto_qmi_setup() {
 			$ROOTER/sms/check_sms.sh $CURRMODEM &
 			ln -s $ROOTER/signal/modemsignal.sh $ROOTER_LINK/getsignal$CURRMODEM
 			# send custom AT startup command
-			if [ $(uci -q get modem.modeminfo$CURRMODEM.at) -eq "1" ]; then
-				ATCMDD=$(uci -q get modem.modeminfo$CURRMODEM.atc)
-				if [ ! -z "${ATCMDD}" ]; then
-					OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
-					OX=$($ROOTER/common/processat.sh "$OX")
-					ERROR="ERROR"
-					if `echo ${OX} | grep "${ERROR}" 1>/dev/null 2>&1`
-					then
-						log "Error sending custom AT command: $ATCMDD with result: $OX"
-					else
-						log "Sent custom AT command: $ATCMDD with result: $OX"
-					fi
+			ATCMDD=$(uci -q get modem.modeminfo$CURRMODEM.atc)
+			if [ ! -z "${ATCMDD}" ]; then
+				OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
+				OX=$($ROOTER/common/processat.sh "$OX")
+				ERROR="ERROR"
+				if `echo ${OX} | grep "${ERROR}" 1>/dev/null 2>&1`
+				then
+					log "Error sending custom AT command: $ATCMDD with result: $OX"
+				else
+					log "Sent custom AT command: $ATCMDD with result: $OX"
 				fi
 			fi
 		fi
@@ -534,16 +582,24 @@ proto_qmi_setup() {
 					INTER=$CURRMODEM
 				fi
 			fi
-			ENB=$(uci -q get mwan3.wan$CURRMODEM.enabled)
-			if [ ! -z $ENB ]; then
-				if [ $CLB = "1" ]; then
-					uci set mwan3.wan$INTER.enabled=1
-				else
-					uci set mwan3.wan$INTER.enabled=0
+			uci set mwan3.wan$INTER.enabled=1
+			log "Check IPv6 Only"
+			if [ "$ipv6only" = "1" ]; then
+				uci set mwan3.wan$INTER.family='ipv6'
+				ipv6=0
+				config_load mwan3
+				config_list_foreach wan1 track_ip handle_ip
+				if [ "$ipv6" = 0 ]; then
+					uci add_list mwan3.wan$INTER.track_ip='ipv6.google.com'
 				fi
-				uci commit mwan3
-				/usr/sbin/mwan3 restart
+				uci set mwan3.CLAT$INTER.enabled=0
+				log "IPv6"
+			else
+				uci set mwan3.wan$INTER.family='ipv4'
+				uci set mwan3.CLAT$INTER.enabled=0
 			fi
+			uci commit mwan3
+			/usr/sbin/mwan3 restart
 		fi
 		rm -f /tmp/usbwait
 

@@ -92,6 +92,31 @@
 		"ext2": "-upgrade.bin",
 		"addons": ["readme.pdf", "factory.txt"]
 	},
+	"GL6416": {
+		"details": "Gl.iNet GL6416",
+		"type": "2",
+		"build": "1907",
+		"flash": "8",
+		"config": ".config_gl6416",
+		"image1": "openwrt-ar71xx-generic-gl-inet-6416A-v1-squashfs-factory.bin",
+		"image2": "openwrt-ar71xx-generic-gl-inet-6416A-v1-squashfs-sysupgrade.bin",
+		"imagepath": "/ar71xx/generic/",
+		"mod": "Gl.iNet-GL6416",
+		"ext1": "-factory.bin",
+		"ext2": "-upgrade.bin",
+		"addons": ["readme.pdf", "factory.txt", "tmp-6416A-v1-squashfs-sysupgrade.bin"]
+	},
+	"H721-1907": {
+		"details": "DualQ H721-1907",
+		"type": "1",
+		"build": "2102",
+		"config": ".config_h721",
+		"image": "openwrt-ramips-mt7621-dualq-h721-256m-16m-squashfs-sysupgrade.bin",
+		"imagepath": "/ramips/mt7621/",
+		"mod": "DualQ-H721-1907",
+		"ext": "-upgrade.bin",
+		"addons": ["readme.pdf", "readmerecovery.txt"]
+	},
 	"IRZ00": {
 		"details": "IRZ-MT00",
 		"type": "1",
@@ -146,6 +171,17 @@
 		"ext2": "-tftp-recovery.bin",
 		"addons": ["readme.pdf", "archer.txt"]
 	},	
+	"MT300NV2": {
+		"details": "Gl.iNet MT300N-V2",
+		"type": "1",
+		"build": "1907",
+		"config": ".config_mt300nv2",
+		"image": "openwrt-ramips-mt76x8-gl-mt300n-v2-squashfs-sysupgrade.bin",
+		"imagepath": "/ramips/mt76x8/",
+		"mod": "GL-MT300N-V2",
+		"ext": "-upgrade.bin",
+		"addons": ["readme.pdf", "glinet.txt"]
+	},
 	"MW4530": {
 		"details": "Mercury MW4530R",
 		"type": "2",
@@ -159,17 +195,6 @@
 		"ext1": "-upgrade.bin",
 		"ext2": "-factory.bin",
 		"addons": ["readme.pdf", "factory.txt"]
-	},
-	"MT300NV2": {
-		"details": "Gl.iNet MT300N-V2",
-		"type": "1",
-		"build": "2102",
-		"config": ".config_mt300nv2",
-		"image": "openwrt-ramips-mt76x8-gl-mt300n-v2-squashfs-sysupgrade.bin",
-		"imagepath": "/ramips/mt76x8/",
-		"mod": "GL-MT300N-V2",
-		"ext": "-upgrade.bin",
-		"addons": ["readme.pdf", "glinet.txt"]
 	},
 	"RB912": {
 		"details": "Mikrotik RB912UAG-2HPnD",
@@ -346,18 +371,6 @@
 		"ext": "-upgrade.bin",
 		"addons": ["readme.pdf"]
 	},
-	"WR902ACV1": {
-		"details": "TP-Link WR902ACv1",
-		"type": "1",
-		"build": "1907",
-		"flash": "8",
-		"config": ".config_wr902acv1",
-		"image": "openwrt-ar71xx-generic-tl-wr902ac-v1-squashfs-sysupgrade.bin",
-		"imagepath": "/ar71xx/generic/",
-		"mod": "TP-Link-WR902ACv1",
-		"ext": "-upgrade.bin",
-		"addons": ["readme.pdf", "archer.txt"]
-	},	
 	"WR902ACV3": {
 		"details": "TP-Link WR902ACv3",
 		"type": "2",

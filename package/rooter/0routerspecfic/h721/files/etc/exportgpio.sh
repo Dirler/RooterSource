@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh 
 
 for i in 22 23 
 do
@@ -10,15 +10,15 @@ done
 
 sleep 1
 
-for i in 22 23
+for i in 22 23 
 do
 echo 0 > /sys/class/gpio/gpio${i}/value
 sleep 8
 done
 
-echo timer > /sys/class/leds/h761:green:4g5g/trigger
-echo 0  > /sys/class/leds/h761:green:4g5g/delay_on
-echo 1000  > /sys/class/leds/h761:green:4g5g/delay_off
-echo timer > /sys/class/leds/h761:green:4g/trigger
-echo 0  > /sys/class/leds/h761:green:4g/delay_on
-echo 1000  > /sys/class/leds/h761:green:4g/delay_off
+echo timer > /sys/class/leds/h721:green:4g5g/trigger
+echo 0  > /sys/class/leds/h721:green:4g5g/delay_on
+echo 1000  > /sys/class/leds/h721:green:4g5g/delay_off
+echo timer > /sys/class/leds/h721:green:4g/trigger
+echo 0  > /sys/class/leds/h721:green:4g/delay_on
+echo 1000  > /sys/class/leds/h721:green:4g/delay_off

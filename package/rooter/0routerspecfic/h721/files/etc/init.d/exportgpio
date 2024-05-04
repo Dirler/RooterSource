@@ -1,5 +1,5 @@
 #!/bin/sh /etc/rc.common
-# Copyright (C) 2013 OpenWrt.org
+# Copyright (C) 2013 OpenWrt.org 
 
 START=95
 USE_PROCD=1
@@ -10,6 +10,6 @@ log() {
 
 start_service()
 {
-	log "H761 Gpio Setup"
+	log "H721 GPIO Setup"
 	/etc/exportgpio.sh &
 }

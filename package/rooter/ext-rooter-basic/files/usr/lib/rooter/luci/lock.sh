@@ -7,7 +7,14 @@ log() {
 	modlog "Lock Band $CURRMODEM" "$@"
 }
 
+restart=$(uci -q get custom.bandlock.restart)
+if [ -z "$restart" ]; then
+	restart="1"
+fi
 RESTART="1"
+if [ "$restart" = "0" ]; then
+	RESTART="0"
+fi
 
 ifname1="ifname"
 if [ -e /etc/newstyle ]; then
@@ -133,6 +140,9 @@ fi
 #log "$mask"
 #log "$mask5g"
 #log "$mask5gsa"
+maskxx=$mask
+mask5gxx=$mask5g
+mask5gsaxx=$mask5gsa
 
 encode $mask
 mask=$maskz
@@ -168,9 +178,9 @@ export TIMEOUT="5"
 case $uVid in
 	"2c7c" )
 		MODT="1"
-		if [ -z "$2" ]; then
-			RESTART="1"
-		fi
+		#if [ -z "$2" ]; then
+		#	RESTART="1"
+		#fi
 		M5=""
 		M2='AT+QCFG="band",0,'$mask',0'
 		if [ $uPid = 0620 ]; then
@@ -273,10 +283,11 @@ case $uVid in
 		if [ -z $mask64 ]; then
 			mask64="0"
 		fi
+		flg="0"
 		case $uPid in
 
 			"68c0"|"9041"|"901f" ) # MC7354 EM/MC7355
-				M2='AT!BAND=11,"Test",0,'$mask64,0
+				M2="AT!BAND=11,\"Test\",0,$mask64,0"
 			;;
 			"9070"|"9071"|"9078"|"9079"|"907a"|"907b" ) # EM/MC7455
 				M2='AT!BAND=11,"Test",0,'$mask64,0
@@ -287,26 +298,67 @@ case $uVid in
 			"9090"|"9091"|"90b1" )
 				M2='AT!BAND=11,"Test",0,'$mask64','$maskl2',0,0,0'
 			;;
+			"90d2"|"90d3" )
+				OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$M1")
+				log "$OX"
+				m64=${maskxx:0:64}
+				m32=${maskxx:64}
+				encode $m64
+				m64="0000000000000000"$maskz
+				m64=${m64: -16}
+				encode $m32
+				m32="0000000000000000"$maskz
+				m32=${m32: -16}
+				M2="AT!BAND=11,1,\"Test\",1,$m64,$m32"
+				OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$M2")
+				log "$OX"
+				m64=${mask5gxx:0:64}
+				m32=${mask5gxx:64}
+				encode $m64
+				m64="0000000000000000"$maskz
+				m64=${m64: -16}
+				encode $m32
+				m32="0000000000000000"$maskz
+				m32=${m32: -16}
+				M2="AT!BAND=11,1,\"Test\",3,$m64,$m32"
+				OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$M2")
+				log "$OX"
+				m64=${mask5gsaxx:0:64}
+				m32=${mask5gsaxx:64}
+				encode $m64
+				m64="0000000000000000"$maskz
+				m64=${m64: -16}
+				encode $m32
+				m32="0000000000000000"$maskz
+				m32=${m32: -16}
+				M2="AT!BAND=11,1,\"Test\",4,$m64,$m32"
+				OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$M2")
+				log "$OX"
+				flg="1"
+			;;
+			
 		esac
 		log "$M2"
 		if [ -e /etc/fake ]; then
 			exit 0
 		fi
-		OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$M1")
-		log "$OX"
-		ATCMDD="AT+CFUN=1,1"
-		OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$M2")
-		log "$OX"
+		if [ "$flg" = "0" ]; then
+			OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$M1")
+			log "$OX"
+			OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$M2")
+			log "$OX"
+		fi
 		M2='AT!BAND=00;!BAND=11'
 		OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$M2")
 		log "$OX"
 		if [ $RESTART = "1" ]; then
+			ATCMDD="AT+CFUN=1,1"
 			OX=$($ROOTER/gcom/gcom-locked "$COMMPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
 			ATCMDD='AT!ENTERCND="AWRONG"'
 		fi
 		OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$CPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
 	;;
-	"8087"|"2cb7" )
+	"8087"|"2cb7"|"0e8d" )
 		MODT="2"
 		FM150=""
 		if [ $uVid = 2cb7 ]; then
@@ -319,29 +371,37 @@ case $uVid in
 		else
 			COMM="XACT"
 		fi
-		ATCMDD='AT+'$COMM'?'
-		log " "
-		log " Get Current Bands : $ATCMDD"
-		log " "
-		OX=$($ROOTER/gcom/gcom-locked "/dev/ttyUSB$CPORT" "run-at.gcom" "$CURRMODEM" "$ATCMDD")
-		log " "
-		log " Get Current Bands Response : $OX"
-		log " "
+		if [ $uVid = 0e8d ]; then
+			COMM="GTACT"
+		fi
 
 		lte=""
 		if [ ! -z $mask ]; then
 			fibdecode $mask 1 0
 			lte=","$lst
-			fi
+		fi
 		L1="4,2,1"
 		lst=""
-		if [ ! -z $FM150 ]; then
-			L1="17,6,"
-			if [ ! -z $mask5g ]; then
+		if [ -n "$FM150" ]; then
+			if [ -n "$lte" ]; then
+				L1="17,6,"
+			else
+				L1="14,,"
+			fi
+			if [ -n "$mask5g" ]; then
 				fibdecode $mask5g 5 0
 				lst=","$lst
 			else
 				L1="4,3,"
+			fi
+		fi
+		if [ $uVid = 0e8d ]; then
+			L1="17,3,6"
+			if [ ! -z $mask5g ]; then
+				fibdecode $mask5g 5 0
+				lst=","$lst
+			else
+				L1="4,3,3"
 			fi
 		fi
 		ATCMDD="AT+""$COMM"="$L1$lte$lst"
