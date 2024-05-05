@@ -14,4 +14,4 @@ Branch allow you to build ROOTer for physically modified WDR3600 routers with 16
 Source: https://www.mail-archive.com/openwrt-devel@lists.openwrt.org/msg45710.html
 To build run "./build WDR3600_16M" command.
 
-See change lisy for details: https://github.com/Dirler/RooterSource/commit/f115120a6dfcccc81af62a889afcb3e1c47041ae
+See change list for details: https://github.com/Dirler/RooterSource/commit/f115120a6dfcccc81af62a889afcb3e1c47041ae
